@@ -799,7 +799,7 @@ struct vec_t<half, vec_size> {
     }
   }
 };
-
+#if (__CUDA_ARCH__ >= 800)
 /******************* vec_t<nv_bfloat16> *******************/
 
 // nv_bfloat16 x 1
@@ -1002,7 +1002,7 @@ struct vec_t<nv_bfloat16, vec_size> {
     }
   }
 };
-
+#endif
 /******************* vec_t<float> *******************/
 
 // float x 1
