@@ -278,6 +278,7 @@ class KVCacheManager:
 
             # Concatenate the computed block IDs and the new block IDs.
             new_blocks = self._get_new_blocks(num_new_blocks)
+            print(f"request {request.request_id} allocate {num_new_blocks}")
             req_blocks.extend(new_blocks)
 
         if not self.enable_caching:
@@ -287,6 +288,11 @@ class KVCacheManager:
         # cache_full_blocks below.
         assert (len(new_computed_cpu_blocks) < len(new_blocks)
                 if new_computed_blocks else True)
+        '''
+        from vllm.utils import vllm_pdb as pdb
+        if len(new_computed_cpu_blocks) > 0:
+            pdb.set_trace()
+        '''
         self.step_h2d_swap_map.update({
             cpu_block.block_id: new_block.block_id
             for cpu_block, new_block in zip(new_computed_cpu_blocks,

@@ -201,7 +201,12 @@ class LlamaAttention(nn.Module):
         qkv, _ = self.qkv_proj(hidden_states)
         q, k, v = qkv.split([self.q_size, self.kv_size, self.kv_size], dim=-1)
         q, k = self.rotary_emb(positions, q, k)
+        import nvtx
+        #rng = nvtx.start_range("attention")
+        from vllm.utils import vllm_pdb as pdb 
+        #pdb.set_trace()
         attn_output = self.attn(q, k, v)
+        #nvtx.end_range(rng)
         output, _ = self.o_proj(attn_output)
         return output
 
@@ -355,8 +360,12 @@ class LlamaModel(nn.Module):
             hidden_states = intermediate_tensors["hidden_states"]
             residual = intermediate_tensors["residual"]
 
+        import nvtx
+        tmp = f"{hidden_states.shape}"
+        # rng = nvtx.start_range(tmp)
         for layer in self.layers[self.start_layer:self.end_layer]:
             hidden_states, residual = layer(positions, hidden_states, residual)
+        # nvtx.end_range(rng)
 
         if not get_pp_group().is_last_rank:
             return IntermediateTensors({

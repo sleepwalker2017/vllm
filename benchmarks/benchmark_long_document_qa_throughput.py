@@ -38,7 +38,7 @@ In the meantime, it also supports all the vLLM engine args to initialize the
 LLM engine. You can refer to the `vllm.engine.arg_utils.EngineArgs` for more
 details.
 """
-
+from prefix import SHORTTERM_INTERESTS_PROMPT, INTERESTS_EXAMPLES, PROMPT_KEYS, FIXED_PROMPT
 import dataclasses
 import random
 import time
@@ -46,7 +46,29 @@ import time
 from vllm import LLM, SamplingParams
 from vllm.engine.arg_utils import EngineArgs
 from vllm.utils import FlexibleArgumentParser
+import pandas as pd
 
+path = '2_000000_000000.parquet'
+def read_data(path):
+    df = pd.read_parquet(path)  # 适用于本地文件
+    total_prompts = []
+    for index, row in df.iterrows():
+        data = row
+        try:
+            prompts = [
+                    SHORTTERM_INTERESTS_PROMPT.format(
+                        **{key: data[key] for key in PROMPT_KEYS},
+                        **FIXED_PROMPT)
+                    for i in range(len([data['user_id']]))
+                ]
+        except:
+            for key in PROMPT_KEYS:
+                print("key", key, data[key])
+            print(data)
+            import pdb; pdb.set_trace()
+        total_prompts.extend(prompts)
+    print("total_prompts", len(total_prompts))
+    return total_prompts
 
 def test_long_document_qa(llm=None, sampling_params=None, prompts=None):
     """
@@ -59,10 +81,10 @@ def test_long_document_qa(llm=None, sampling_params=None, prompts=None):
         prompts: A list of prompt strings to be processed by the LLM.
     """
     start_time = time.time()
+    prompts = prompts[:1000]
     llm.generate(prompts, sampling_params=sampling_params)
     end_time = time.time()
     print(f"Time to execute all requests: {end_time - start_time:.4f} secs")
-
 
 def repeat_prompts(prompts, repeat_count, mode: str):
     """
@@ -113,7 +135,8 @@ def main(args):
         for i in range(args.num_documents)
     ]
 
-    prompts = repeat_prompts(prompts, args.repeat_count, mode=args.repeat_mode)
+    #prompts = repeat_prompts(prompts, args.repeat_count, mode=args.repeat_mode)
+    prompts = read_data(path)
 
     warmup_prompts = [
         "This is warm up request " + str(i) + \
@@ -123,21 +146,34 @@ def main(args):
     # Create the LLM engine
     engine_args = EngineArgs.from_cli_args(args)
     llm = LLM(**dataclasses.asdict(engine_args))
+    print("args.output_len", args.output_len)
     sampling_params = SamplingParams(temperature=0, max_tokens=args.output_len)
 
+    '''
     print("------warm up------")
     test_long_document_qa(
         llm=llm,
         prompts=warmup_prompts,
         sampling_params=sampling_params,
     )
+    '''
 
     print("------start generating------")
+    import nvtx
+    nvtx.push_range("test")
     test_long_document_qa(
         llm=llm,
         prompts=prompts,
         sampling_params=sampling_params,
     )
+    nvtx.pop_range()
+    '''
+    test_long_document_qa(
+        llm=llm,
+        prompts=prompts,
+        sampling_params=sampling_params,
+    )
+    '''
 
 
 if __name__ == "__main__":
@@ -160,7 +196,7 @@ if __name__ == "__main__":
                         help='Range of input lengths for sampling prompts,'
                         'specified as "min:max" (e.g., "128:256").')
 
-    parser.add_argument('--output-len', type=int, default=10)
+    parser.add_argument('--output-len', type=int, default=100)
 
     parser.add_argument('--repeat-count',
                         type=int,
@@ -181,4 +217,8 @@ if __name__ == "__main__":
 
     parser = EngineArgs.add_cli_args(parser)
     args = parser.parse_args()
+    args.enforce_eager=True
     main(args)
+    while True:
+        #pass
+        break

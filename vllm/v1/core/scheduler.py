@@ -98,6 +98,8 @@ class Scheduler:
         # for these models.
         self.encoder_cache_manager = EncoderCacheManager(
             cache_size=encoder_cache_size)
+        self.hit_count = {}
+        self.schedule_cnt = 0
 
     def schedule(self) -> "SchedulerOutput":
         # NOTE(woosuk) on the scheduling algorithm:
@@ -111,6 +113,7 @@ class Scheduler:
         # chunked prefills, prefix caching, speculative decoding,
         # and the "jump decoding" optimization in the future.
 
+        from vllm.utils import vllm_pdb as pdb
         scheduled_new_reqs: List[Request] = []
         scheduled_resumed_reqs: List[Request] = []
         scheduled_running_reqs: List[Request] = []
@@ -128,15 +131,22 @@ class Scheduler:
         # For logging.
         scheduled_timestamp = time.monotonic()
 
+        from vllm.utils import vllm_pdb as pdb
+        '''
+        if len(self.running) > 0:
+            pdb.set_trace()
+        '''
         # First, schedule the RUNNING requests.
         req_index = 0
         while req_index < len(self.running) and token_budget > 0:
+            # pdb.set_trace()
             request = self.running[req_index]
             if request.request_id in self.scheduled_req_ids:
                 # This request has already been scheduled.
                 req_index += 1
                 continue
 
+            # usually it's 1
             num_new_tokens = (request.num_tokens_with_spec -
                               request.num_computed_tokens)
             num_new_tokens = min(num_new_tokens, token_budget)
@@ -157,10 +167,17 @@ class Scheduler:
                 req_index += 1
                 continue
 
+            # check if this request can be scheduled
             while True:
+                '''
+                pdb.set_trace()
+                '''
                 new_blocks = self.kv_cache_manager.allocate_slots(
                     request, num_new_tokens)
+
+                # usually it's [], not None
                 if new_blocks is None:
+                    print(f"when scheduling {request.request_id} with {num_new_tokens} tokens, free blocks {self.kv_cache_manager.free_block_queue.num_free_blocks}, preempted_req")
                     # The request cannot be scheduled.
                     # Preempt the lowest-priority request.
                     preempted_req = self.running.pop()
@@ -177,6 +194,7 @@ class Scheduler:
                 else:
                     # The request can be scheduled.
                     can_schedule = True
+                    # print("schedule running, new tokens", num_new_tokens, "allocate new blocks", len(new_blocks))
                     break
             if not can_schedule:
                 break
@@ -226,6 +244,7 @@ class Scheduler:
                 if len(self.running) == self.max_num_running_reqs:
                     break
 
+                from vllm.utils import vllm_pdb as pdb
                 request = self.waiting[0]
 
                 # Check that adding the request still respects the max_loras
@@ -247,6 +266,8 @@ class Scheduler:
                 # Get already-cached tokens.
                 computed_blocks, computed_cpu_blocks, num_computed_tokens = (
                     self.kv_cache_manager.get_computed_blocks(request))
+
+                # print("request", request.request_id, "cached", len(block_ids), block_ids)
                 # Number of tokens to be scheduled.
                 # We use `request.num_tokens` instead of
                 # `request.num_prompt_tokens` to consider the resumed requests,
@@ -267,6 +288,12 @@ class Scheduler:
                     else:
                         computed_cpu_blocks.pop()
                 num_new_tokens = min(num_new_tokens, token_budget)
+                '''
+                tmp = 16 * (self.kv_cache_manager.free_block_queue.num_free_blocks - 100)
+
+                if tmp > 0:
+                    num_new_tokens = min(num_new_tokens, tmp)
+                '''
                 assert num_new_tokens > 0
 
                 # Schedule encoder inputs.
@@ -286,8 +313,24 @@ class Scheduler:
                 )
                 if new_blocks is None:
                     # The request cannot be scheduled.
+                    print(f"try to schedule request {request.request_id}, but free blocks is", self.kv_cache_manager.free_block_queue.num_free_blocks, "num_new_tokens", num_new_tokens)
                     break
 
+                block_ids = []
+                for block in computed_blocks:
+                    block_ids.append(block.block_id)
+                    if block.block_id not in self.hit_count.keys():
+                        self.hit_count[block.block_id] = 1
+                    else:
+                        self.hit_count[block.block_id] += 1
+                #if self.schedule_cnt > 5400:
+                if self.schedule_cnt > 55550:
+                    print("self.waiting", len(self.waiting), "this time count", request.request_id)
+                    print(self.hit_count)
+                    import pickle
+                    with open("data.pkl", "wb") as f:  # "wb" 代表以二进制写入
+                        pickle.dump(self.hit_count, f)
+                self.schedule_cnt += 1
                 self.waiting.popleft()
                 self.running.append(request)
                 self.scheduled_req_ids.add(request.request_id)
@@ -384,6 +427,12 @@ class Scheduler:
         self.kv_cache_manager.end_schedule_step()
 
         self.finished_req_ids = set()
+        from vllm.utils import vllm_pdb as pdb
+        # pdb.set_trace()
+        print("scheduled tokens", scheduler_output.total_num_scheduled_tokens, "free blocks", self.kv_cache_manager.free_block_queue.num_free_blocks)
+        print(scheduler_output.num_scheduled_tokens.values())
+        print("---------------------------")
+        # print(scheduler_output.num_scheduled_tokens)
         return scheduler_output
 
     def _make_cached_request_data(

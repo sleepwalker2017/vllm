@@ -179,7 +179,10 @@ class MixtralAttention(nn.Module):
         qkv, _ = self.qkv_proj(hidden_states)
         q, k, v = qkv.split([self.q_size, self.kv_size, self.kv_size], dim=-1)
         q, k = self.rotary_emb(positions, q, k)
+        import nvtx
+        rng = nvtx.start_range("attn")
         attn_output = self.attn(q, k, v)
+        nvtx.end_range(rng)
         output, _ = self.o_proj(attn_output)
         return output
 

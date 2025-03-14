@@ -94,6 +94,7 @@ class FlashAttentionMetadata:
     num_input_tokens: int = 0  # Number of tokens including padding.
 
 
+g_cnt = -1
 class FlashAttentionImpl(AttentionImpl):
 
     def __init__(
@@ -168,6 +169,8 @@ class FlashAttentionImpl(AttentionImpl):
         """
         assert output is not None, "Output tensor must be provided."
 
+        global g_cnt
+        g_cnt += 1
         if attn_metadata is None:
             # Profiling run.
             return output
@@ -199,9 +202,14 @@ class FlashAttentionImpl(AttentionImpl):
             layer._v_scale,
         )
 
+        import nvtx
         # Compute attention and update output up to `num_actual_tokens`.
         if not attn_metadata.use_cascade:
             # Regular attention (common case).
+            #rng = nvtx.start_range("normal flash attn")
+            tmp = f"{num_actual_tokens}_normal"
+            if g_cnt % 32 == 0:
+                rng = nvtx.start_range(tmp)
             flash_attn_varlen_func(
                 q=query[:num_actual_tokens],
                 k=key_cache,
@@ -219,8 +227,13 @@ class FlashAttentionImpl(AttentionImpl):
                 softcap=self.logits_soft_cap,
                 fa_version=self.vllm_flash_attn_version,
             )
+            if g_cnt % 32 == 0:
+                nvtx.end_range(rng)
             return output
 
+        tmp = f"{num_actual_tokens}_cascade"
+        if g_cnt % 32 == 0:
+            rng = nvtx.start_range(tmp)
         # Cascade attention (rare case).
         cascade_attention(
             output[:num_actual_tokens],
@@ -241,6 +254,8 @@ class FlashAttentionImpl(AttentionImpl):
             common_prefix_len=attn_metadata.common_prefix_len,
             fa_version=self.vllm_flash_attn_version,
         )
+        if g_cnt % 32 == 0:
+            nvtx.end_range(rng)
         return output
 
 
@@ -264,14 +279,17 @@ def use_cascade_attention(
     # NOTE(woosuk): This is the common case. We should return False as soon as
     # possible to avoid any unnecessary computation.
     if common_prefix_len < 256:
+        #print("common_prefix_len is too short, return false", common_prefix_len)
         return False
     # Cascade attention is currently not supported with these variants.
     if use_alibi or use_sliding_window:
+        #print("use_alibi or use_sliding_window, false")
         return False
     # Too few queries. Probably not worth using cascade attention.
     # We use an arbitrary threshold of 8 queries. TODO: Tune this threshold.
     num_reqs = len(query_lens)
     if num_reqs < 8:
+        #print("num_reqs too small?? return false", num_reqs)
         return False
 
     # Heuristics to decide whether using cascade attention is beneficial.
@@ -284,6 +302,7 @@ def use_cascade_attention(
                           and not use_alibi and np.all(query_lens == 1))
     if not use_flash_decoding:
         # Use cascade attention.
+        #print("use_flash_decoding is false, return true")
         return True
 
     # 2. When FlashDecoding is used for normal attention, it is not clear
@@ -307,7 +326,7 @@ def use_cascade_attention(
                            cdiv(num_queries_per_kv, q_tile_size))
     flash_decoding_ctas *= num_prefix_tiles
     flash_decoding_time = cdiv(flash_decoding_ctas, num_sms)
-
+    #print("cascade_time vs flash_decoding_time", cascade_time, flash_decoding_time)
     # Use cascade attention if it is faster than FlashDecoding.
     return cascade_time < flash_decoding_time
 

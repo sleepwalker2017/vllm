@@ -55,6 +55,20 @@ from vllm.logger import enable_trace_function_call, init_logger
 if TYPE_CHECKING:
     from vllm.config import VllmConfig
 
+import sys
+import pdb
+
+class ForkedPdb(pdb.Pdb):
+    def interaction(self, *args, **kwargs):
+        _stdin = sys.stdin
+        try:
+            sys.stdin = open('/dev/stdin')
+            pdb.Pdb.interaction(self, *args, **kwargs)
+        finally:
+            sys.stdin = _stdin
+            
+vllm_pdb=ForkedPdb(nosigint=True)
+
 logger = init_logger(__name__)
 
 # Exception strings for non-implemented encoder/decoder scenarios
