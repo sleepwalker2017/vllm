@@ -48,7 +48,7 @@ from vllm.engine.arg_utils import EngineArgs
 from vllm.utils import FlexibleArgumentParser
 import pandas as pd
 
-path = '2_000000_000000.parquet'
+path = '/data/weilong.yu/mac_files/2_000000_000000.parquet'
 def read_data(path):
     df = pd.read_parquet(path)  # 适用于本地文件
     total_prompts = []
@@ -135,9 +135,10 @@ def main(args):
         for i in range(args.num_documents)
     ]
 
-    #prompts = repeat_prompts(prompts, args.repeat_count, mode=args.repeat_mode)
-    prompts = read_data(path)
+    prompts = repeat_prompts(prompts, args.repeat_count, mode=args.repeat_mode)
+    #prompts = read_data(path)
 
+    import pdb; pdb.set_trace()
     warmup_prompts = [
         "This is warm up request " + str(i) + \
                 ' '.join(['hi'] * args.document_length)
